@@ -6,6 +6,14 @@ import socket
 
 import config
 
+# Настройка для скрытия окон CMD в EXE (PyInstaller --windowed)
+if os.name == 'nt':  # Только для Windows
+    STARTUPINFO = subprocess.STARTUPINFO()
+    STARTUPINFO.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    STARTUPINFO.wShowWindow = subprocess.SW_HIDE
+else:
+    STARTUPINFO = None
+
 
 class WiFiMonitor:
     """Класс для мониторинга и управления Wi-Fi подключениями"""
@@ -24,7 +32,8 @@ class WiFiMonitor:
                 capture_output=True,
                 text=True,
                 encoding='cp866',
-                timeout=5
+                timeout=5,
+                startupinfo=STARTUPINFO  # Скрывает окно
             )
 
             if result.returncode == 0:
@@ -47,7 +56,8 @@ class WiFiMonitor:
                 capture_output=True,
                 text=True,
                 encoding='cp866',
-                timeout=3
+                timeout=3,
+                startupinfo=STARTUPINFO  # Скрывает окно
             )
 
             if result.returncode == 0:
@@ -76,14 +86,15 @@ class WiFiMonitor:
 
         for attempt in range(1, max_attempts + 1):
             try:
-                # Удаляем старый профиль, если он существует
+                # Удаляем старый профиль
                 subprocess.run(
                     ["netsh", "wlan", "delete", "profile", f"name={self.ssid}"],
                     capture_output=True,
-                    text=True
+                    text=True,
+                    startupinfo=STARTUPINFO  # Скрывает окно
                 )
 
-                # Создаем XML профиль для подключения
+                # Создаем XML профиль
                 profile_xml = f"""<?xml version="1.0"?>
 <WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
     <name>{self.ssid}</name>
@@ -110,30 +121,32 @@ class WiFiMonitor:
     </MSM>
 </WLANProfile>"""
 
-                # Временно сохраняем XML в файл
+                # Сохраняем временный XML-файл
                 temp_filename = f"{self.ssid.replace(' ', '_')}.xml"
                 with open(temp_filename, "w", encoding='utf-8') as f:
                     f.write(profile_xml)
 
                 # Добавляем профиль
-                add_result = subprocess.run(
+                subprocess.run(
                     ["netsh", "wlan", "add", "profile", f"filename={temp_filename}"],
                     capture_output=True,
-                    text=True
+                    text=True,
+                    startupinfo=STARTUPINFO  # Скрывает окно
                 )
 
                 # Подключаемся
                 connect_result = subprocess.run(
                     ["netsh", "wlan", "connect", f"name={self.ssid}"],
                     capture_output=True,
-                    text=True
+                    text=True,
+                    startupinfo=STARTUPINFO  # Скрывает окно
                 )
 
                 # Удаляем временный файл
                 if os.path.exists(temp_filename):
                     os.remove(temp_filename)
 
-                # Проверяем результат
+                # Проверяем результат подключения
                 if connect_result.returncode == 0:
                     time.sleep(3)
 
