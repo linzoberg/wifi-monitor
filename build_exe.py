@@ -8,7 +8,7 @@ def build_exe():
     """Автоматическая сборка EXE-файла с помощью PyInstaller"""
 
     # Параметры сборки (точно как вы просили)
-    script_name = "main_gui.py"
+    script_name = "main.py"
     exe_name = "WiFi_Monitor"
     args = [
         "--onefile",  # Один файл
