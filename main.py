@@ -64,22 +64,23 @@ class PingThread(QThread):
                if system == "windows"
                else ["ping", "-c", "1", "-W", "2", self.PING_HOST])
         try:
+            # Флаг CREATE_NO_WINDOW — скрывает окно консоли ping.exe
+            creation_flags = 0x08000000 if system == "windows" else 0
+
             result = subprocess.run(
                 cmd,
                 capture_output=True,
-                timeout=5
+                timeout=5,
+                creationflags=creation_flags  # ← это скрывает окно
             )
-            # cp866 — кодировка cmd на русской Windows
             output = result.stdout.decode("cp866", errors="ignore")
 
-            # Ищем паттерн "время=208" или "время<1"
             match = re.search(r"[Вв]ремя\s*[=<]\s*(\d+)", output)
             if not match:
                 match = re.search(r"[Tt]ime[=<](\d+)", output)
             if match:
                 return int(match.group(1))
 
-            # время < 1мс
             if result.returncode == 0 and re.search(r"[Вв]ремя\s*<\s*1", output):
                 return 1
 
