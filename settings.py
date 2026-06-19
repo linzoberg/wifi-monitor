@@ -8,13 +8,20 @@ import os
 import sys
 
 import keyring
+import keyring.errors
 from PyQt5.QtCore import QSettings
+
+import config
 
 ORG_NAME = "WiFiMonitor"
 APP_NAME = "WiFiMonitor"
 KEYRING_SERVICE = "WiFiMonitor"
 AUTOSTART_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 AUTOSTART_NAME = "WiFiMonitor"
+
+# Допустимые диапазоны значений настроек (защита от мусора)
+CHECK_INTERVAL_MIN, CHECK_INTERVAL_MAX = 1, 3600
+PING_INTERVAL_MIN, PING_INTERVAL_MAX = 1, 3600
 
 
 # ── Учётные данные ────────────────────────────
@@ -26,14 +33,17 @@ def load_credentials() -> tuple[str, str, bool]:
     """Возвращает (ssid, password, remember). Пустые строки если не сохранены."""
     qs = _qs()
     remember = qs.value("remember", False, type=bool)
-    ssid = qs.value("ssid", "", type=str) if remember else ""
+    if not remember:
+        return "", "", False
+
+    ssid = qs.value("ssid", "", type=str)
     password = ""
-    if remember and ssid:
+    if ssid:
         try:
             password = keyring.get_password(KEYRING_SERVICE, ssid) or ""
         except keyring.errors.KeyringError:
             password = ""
-    return ssid, password, remember
+    return ssid, password, True
 
 
 def save_credentials(ssid: str, password: str) -> None:
@@ -44,6 +54,43 @@ def save_credentials(ssid: str, password: str) -> None:
         keyring.set_password(KEYRING_SERVICE, ssid, password)
     except keyring.errors.KeyringError:
         pass
+
+
+# ── Пользовательские настройки ────────────────
+class Prefs:
+    """Контейнер пользовательских настроек."""
+
+    __slots__ = ("check_interval", "ping_interval", "router_ip")
+
+    def __init__(self, check_interval: int, ping_interval: int, router_ip: str):
+        self.check_interval = check_interval
+        self.ping_interval = ping_interval
+        self.router_ip = router_ip
+
+
+def _clamp(value: int, lo: int, hi: int) -> int:
+    return max(lo, min(hi, value))
+
+
+def load_prefs() -> Prefs:
+    """Загружает настройки, подставляя дефолты из config.py."""
+    qs = _qs()
+    check_interval = qs.value("check_interval", config.CHECK_INTERVAL, type=int)
+    ping_interval = qs.value("ping_interval", 5, type=int)
+    router_ip = qs.value("router_ip", config.ROUTER_IP, type=str) or config.ROUTER_IP
+
+    return Prefs(
+        check_interval=_clamp(check_interval, CHECK_INTERVAL_MIN, CHECK_INTERVAL_MAX),
+        ping_interval=_clamp(ping_interval, PING_INTERVAL_MIN, PING_INTERVAL_MAX),
+        router_ip=router_ip.strip(),
+    )
+
+
+def save_prefs(prefs: Prefs) -> None:
+    qs = _qs()
+    qs.setValue("check_interval", int(prefs.check_interval))
+    qs.setValue("ping_interval", int(prefs.ping_interval))
+    qs.setValue("router_ip", prefs.router_ip.strip())
 
 
 def forget_credentials() -> None:
@@ -62,9 +109,7 @@ def forget_credentials() -> None:
 def _exe_command() -> str:
     """Команда для автозапуска: путь к exe (или python + main.py при отладке)."""
     if getattr(sys, "frozen", False):
-        # Собранный PyInstaller-ом exe
         return f'"{sys.executable}"'
-    # Режим разработки: python.exe main.py
     script = os.path.abspath(os.path.join(os.path.dirname(__file__), "main.py"))
     return f'"{sys.executable}" "{script}"'
 

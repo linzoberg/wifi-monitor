@@ -1,3 +1,6 @@
+"""
+Управление и мониторинг Wi-Fi подключения через netsh (Windows).
+"""
 import os
 import re
 import socket
@@ -6,79 +9,62 @@ import tempfile
 import time
 
 import config
+from proc_utils import run_hidden
 
-# ─────────────────────────────────────────────
-#  Скрытие окон CMD (PyInstaller --windowed)
-# ─────────────────────────────────────────────
-if os.name == "nt":
-    STARTUPINFO = subprocess.STARTUPINFO()
-    STARTUPINFO.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    STARTUPINFO.wShowWindow = subprocess.SW_HIDE
-    CREATE_NO_WINDOW = 0x08000000
-else:
-    STARTUPINFO = None
-    CREATE_NO_WINDOW = 0
+# Совпадает строка вида:  SSID                   : MyNetwork
+_RE_SSID = re.compile(r"^\s*SSID\s*:\s*(.+)$", re.MULTILINE)
 
-
-# Прекомпилированные regex
-_RE_SSID = re.compile(r"SSID\s*:\s*(.+)")
-
-
-def _run(cmd, timeout=5, text=True, encoding="cp866"):
-    """Универсальный запуск netsh-команды со скрытым окном."""
-    return subprocess.run(
-        cmd,
-        capture_output=True,
-        text=text,
-        encoding=encoding if text else None,
-        timeout=timeout,
-        startupinfo=STARTUPINFO,
-        creationflags=CREATE_NO_WINDOW,
-    )
+# Признаки активного подключения в выводе netsh wlan show interfaces.
+# В разных локалях Windows строка отличается, поэтому держим набор маркеров.
+_CONNECTED_MARKERS = ("подключено", "connected")
 
 
 class WiFiMonitor:
-    """Класс для мониторинга и управления Wi-Fi подключениями."""
+    """Мониторинг и управление подключением к Wi-Fi."""
 
-    def __init__(self, ssid: str, password: str):
+    def __init__(self, ssid: str, password: str, router_ip: str | None = None):
         self.ssid = ssid
         self.password = password
+        self.router_ip = router_ip or config.ROUTER_IP
         self.connected = False
         self.ssid_available = False
 
     # ── Сканирование сетей ────────────────────
     def check_wifi_available(self) -> bool:
-        """Проверяет, доступна ли указанная Wi-Fi сеть."""
+        """Проверяет, видна ли указанная сеть в эфире."""
         try:
-            result = _run(["netsh", "wlan", "show", "networks"], timeout=5)
-            if result.returncode == 0:
-                self.ssid_available = self.ssid in result.stdout
-                return self.ssid_available
-        except (subprocess.SubprocessError, OSError) as e:
-            print(f"Ошибка при сканировании сетей: {e}")
-        return False
+            result = run_hidden(["netsh", "wlan", "show", "networks"], timeout=5)
+        except (subprocess.SubprocessError, OSError):
+            return False
+
+        if result.returncode != 0 or not result.stdout:
+            return False
+
+        self.ssid_available = self.ssid in result.stdout
+        return self.ssid_available
 
     # ── Текущее подключение ───────────────────
     def get_current_connection(self) -> bool:
-        """Проверяет, подключены ли мы к нужной сети."""
+        """Проверяет, что мы реально подключены к нужной сети."""
         try:
-            result = _run(["netsh", "wlan", "show", "interfaces"], timeout=3)
-            if result.returncode != 0:
-                self.connected = False
-                return False
-
-            output = result.stdout
-            ssid_match = _RE_SSID.search(output)
-            current_ssid = ssid_match.group(1).strip() if ssid_match else None
-            is_connected = "подключено" in output.lower()
-
-            self.connected = bool(current_ssid == self.ssid and is_connected)
-            return self.connected
-
-        except (subprocess.SubprocessError, OSError) as e:
-            print(f"Ошибка при получении информации о подключении: {e}")
+            result = run_hidden(["netsh", "wlan", "show", "interfaces"], timeout=3)
+        except (subprocess.SubprocessError, OSError):
             self.connected = False
             return False
+
+        if result.returncode != 0 or not result.stdout:
+            self.connected = False
+            return False
+
+        output = result.stdout
+        ssid_match = _RE_SSID.search(output)
+        current_ssid = ssid_match.group(1).strip() if ssid_match else None
+
+        output_lower = output.lower()
+        is_connected = any(marker in output_lower for marker in _CONNECTED_MARKERS)
+
+        self.connected = current_ssid == self.ssid and is_connected
+        return self.connected
 
     # ── Подключение к Wi-Fi ───────────────────
     def _build_profile_xml(self) -> str:
@@ -110,68 +96,69 @@ class WiFiMonitor:
             '</WLANProfile>\n'
         )
 
-    def connect_to_wifi(self):
-        """Подключается к указанной Wi-Fi сети с повторными попытками."""
+    def _try_connect_once(self) -> tuple[bool, str]:
+        """Одна попытка установить соединение. Возвращает (успех, описание ошибки)."""
+        temp_path = None
+        try:
+            # Удаляем старый профиль (ошибки игнорируем — его могло и не быть)
+            run_hidden(
+                ["netsh", "wlan", "delete", "profile", f"name={self.ssid}"],
+                timeout=5,
+            )
+
+            # Создаём временный XML-файл с профилем
+            fd, temp_path = tempfile.mkstemp(prefix="wifi_", suffix=".xml")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(self._build_profile_xml())
+
+            # Добавляем профиль
+            run_hidden(
+                ["netsh", "wlan", "add", "profile", f"filename={temp_path}"],
+                timeout=5,
+            )
+
+            # Подключаемся
+            connect_result = run_hidden(
+                ["netsh", "wlan", "connect", f"name={self.ssid}"],
+                timeout=5,
+            )
+
+            if connect_result.returncode != 0:
+                return False, "ошибка команды подключения"
+
+            if self._wait_for_connection(timeout=5.0, poll=0.5):
+                return True, ""
+            return False, "не удалось установить соединение"
+
+        except (subprocess.SubprocessError, OSError) as e:
+            return False, f"ошибка: {e}"
+
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+
+    def connect_to_wifi(self) -> tuple[bool, str]:
+        """Пытается подключиться, с повторами по конфигу."""
         max_attempts = config.RECONNECT_ATTEMPTS
         last_error = ""
 
         for attempt in range(1, max_attempts + 1):
-            temp_path = None
-            try:
-                # Удаляем старый профиль
-                _run(
-                    ["netsh", "wlan", "delete", "profile", f"name={self.ssid}"],
-                    timeout=5,
-                )
+            ok, err = self._try_connect_once()
+            if ok:
+                return True, f"Успешно подключено к {self.ssid}"
 
-                # Создаём временный XML-файл с профилем
-                fd, temp_path = tempfile.mkstemp(prefix="wifi_", suffix=".xml")
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    f.write(self._build_profile_xml())
+            last_error = f"Попытка {attempt}/{max_attempts}: {err}"
 
-                # Добавляем профиль
-                _run(
-                    ["netsh", "wlan", "add", "profile", f"filename={temp_path}"],
-                    timeout=5,
-                )
-
-                # Подключаемся
-                connect_result = _run(
-                    ["netsh", "wlan", "connect", f"name={self.ssid}"],
-                    timeout=5,
-                )
-
-                if connect_result.returncode == 0:
-                    if self._wait_for_connection(timeout=5.0, poll=0.5):
-                        return True, f"Успешно подключено к {self.ssid}"
-                    last_error = (
-                        f"Попытка {attempt}/{max_attempts}: "
-                        f"не удалось установить соединение"
-                    )
-                else:
-                    last_error = (
-                        f"Попытка {attempt}/{max_attempts}: "
-                        f"ошибка команды подключения"
-                    )
-
-            except (subprocess.SubprocessError, OSError) as e:
-                last_error = f"Попытка {attempt}/{max_attempts}: ошибка: {e}"
-
-            finally:
-                if temp_path and os.path.exists(temp_path):
-                    try:
-                        os.remove(temp_path)
-                    except OSError:
-                        pass
-
-            # Пауза перед следующей попыткой
             if attempt < max_attempts:
                 time.sleep(config.RECONNECT_DELAY)
 
         return False, f"Не удалось подключиться после {max_attempts} попыток ({last_error})"
 
     def _wait_for_connection(self, timeout: float = 5.0, poll: float = 0.5) -> bool:
-        """Активно ждёт появления подключения вместо фиксированной паузы."""
+        """Активно ждёт подключения вместо фиксированной паузы."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if self.get_current_connection():
@@ -181,8 +168,8 @@ class WiFiMonitor:
 
     # ── Интернет ──────────────────────────────
     def check_internet(self) -> bool:
-        """Проверяет доступность интернета (роутер → DNS Google)."""
-        for host, port in ((config.ROUTER_IP, 80), ("8.8.8.8", 53)):
+        """Доступен ли интернет: пробуем роутер, затем DNS Google."""
+        for host, port in ((self.router_ip, 80), ("8.8.8.8", 53)):
             try:
                 with socket.create_connection((host, port), timeout=2):
                     return True
