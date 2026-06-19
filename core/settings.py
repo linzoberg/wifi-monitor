@@ -11,7 +11,7 @@ import keyring
 import keyring.errors
 from PyQt5.QtCore import QSettings
 
-import wifi_monitor
+from core import wifi
 
 ORG_NAME = "WiFiMonitor"
 APP_NAME = "WiFiMonitor"
@@ -73,11 +73,11 @@ def _clamp(value: int, lo: int, hi: int) -> int:
 
 
 def load_prefs() -> Prefs:
-    """Загружает настройки, подставляя дефолты из wifi_monitor.py."""
+    """Загружает настройки, подставляя дефолты из core/wifi.py."""
     qs = _qs()
-    check_interval = qs.value("check_interval", wifi_monitor.CHECK_INTERVAL, type=int)
+    check_interval = qs.value("check_interval", wifi.CHECK_INTERVAL, type=int)
     ping_interval = qs.value("ping_interval", 5, type=int)
-    router_ip = qs.value("router_ip", wifi_monitor.ROUTER_IP, type=str) or wifi_monitor.ROUTER_IP
+    router_ip = qs.value("router_ip", wifi.ROUTER_IP, type=str) or wifi.ROUTER_IP
 
     return Prefs(
         check_interval=_clamp(check_interval, CHECK_INTERVAL_MIN, CHECK_INTERVAL_MAX),
@@ -110,7 +110,9 @@ def _exe_command() -> str:
     """Команда для автозапуска: путь к exe (или python + main.py при отладке)."""
     if getattr(sys, "frozen", False):
         return f'"{sys.executable}"'
-    script = os.path.abspath(os.path.join(os.path.dirname(__file__), "main.py"))
+    script = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "main.py")
+    )
     return f'"{sys.executable}" "{script}"'
 
 
