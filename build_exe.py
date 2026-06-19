@@ -3,23 +3,45 @@ import shutil
 import sys
 
 
+def _find_upx() -> str | None:
+    """Ищет upx.exe в PATH или в подпапке ./upx/. Возвращает путь к директории или None."""
+    upx_exe = shutil.which("upx")
+    if upx_exe:
+        return os.path.dirname(upx_exe)
+
+    local_upx_dir = os.path.join(os.path.dirname(__file__), "upx")
+    if os.path.exists(os.path.join(local_upx_dir, "upx.exe")):
+        return local_upx_dir
+
+    return None
+
+
 def build_exe():
     """Автоматическая сборка EXE-файла с помощью PyInstaller"""
 
-    # Параметры сборки (точно как вы просили)
     script_name = "main.py"
     exe_name = "WiFi_Monitor"
     args = [
-        "--onefile",  # Один файл
-        "--windowed",  # Без консольного окна (для GUI)
+        "--onefile",   # Один файл
+        "--windowed",  # Без консольного окна (GUI)
         "--name", exe_name,
-        script_name
     ]
 
-    print("Запуск сборки EXE-файла...")
-    print(f"Параметры: pyinstaller {' '.join(args)}")
+    # UPX-сжатие, если найден
+    upx_dir = _find_upx()
+    if upx_dir:
+        print(f"UPX найден: {upx_dir} — включаем сжатие")
+        args += ["--upx-dir", upx_dir]
+    else:
+        print("UPX не найден — собираем без сжатия")
+        print("  (положи upx.exe в PATH или в ./upx/ для уменьшения exe ~в 2-3 раза)")
 
-    # Очистка предыдущих сборок (опционально, но рекомендуется)
+    args.append(script_name)
+
+    print("\nЗапуск сборки EXE-файла...")
+    print(f"Параметры: pyinstaller {' '.join(args)}\n")
+
+    # Очистка предыдущих сборок
     folders_to_clean = ["build", "dist", "__pycache__"]
     files_to_clean = [f"{exe_name}.spec"]
 
@@ -33,12 +55,18 @@ def build_exe():
             print(f"Удаление файла: {file}")
             os.remove(file)
 
-    # Запуск PyInstaller через его Python API (надёжнее, чем subprocess)
+    # Запуск PyInstaller через его Python API
     try:
         import PyInstaller.__main__
         PyInstaller.__main__.run(args)
-        print("\nСборка успешно завершена!")
-        print(f"Готовый файл: dist/{exe_name}.exe")
+
+        exe_path = os.path.join("dist", f"{exe_name}.exe")
+        if os.path.exists(exe_path):
+            size_mb = os.path.getsize(exe_path) / (1024 * 1024)
+            print(f"\nСборка успешно завершена!")
+            print(f"Готовый файл: {exe_path} ({size_mb:.1f} МБ)")
+        else:
+            print("\nСборка завершена, но exe не найден в dist/")
         print("Можете распространять его без Python!")
 
     except ImportError:
