@@ -1,7 +1,6 @@
 import os
 import shutil
 import sys
-from subprocess import run, CalledProcessError
 
 
 def build_exe():

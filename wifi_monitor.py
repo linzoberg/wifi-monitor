@@ -22,7 +22,6 @@ else:
 
 # Прекомпилированные regex
 _RE_SSID = re.compile(r"SSID\s*:\s*(.+)")
-_RE_STATE = re.compile(r"Состояние\s*:\s*(.+)", re.IGNORECASE)
 
 
 def _run(cmd, timeout=5, text=True, encoding="cp866"):
@@ -73,10 +72,7 @@ class WiFiMonitor:
             output = result.stdout
             ssid_match = _RE_SSID.search(output)
             current_ssid = ssid_match.group(1).strip() if ssid_match else None
-            is_connected = (
-                _RE_STATE.search(output) is not None
-                and "подключено" in output.lower()
-            )
+            is_connected = "подключено" in output.lower()
 
             self.connected = bool(current_ssid == self.ssid and is_connected)
             return self.connected
@@ -117,8 +113,9 @@ class WiFiMonitor:
         )
 
     def connect_to_wifi(self):
-        """Подключается к указанной Wi-Fi сети."""
+        """Подключается к указанной Wi-Fi сети с повторными попытками."""
         max_attempts = config.RECONNECT_ATTEMPTS
+        last_error = ""
 
         for attempt in range(1, max_attempts + 1):
             temp_path = None
@@ -150,18 +147,18 @@ class WiFiMonitor:
                     time.sleep(3)
                     if self.get_current_connection():
                         return True, f"Успешно подключено к {self.ssid}"
-                    return (
-                        False,
-                        f"Попытка {attempt}/{max_attempts}: Не удалось установить соединение",
+                    last_error = (
+                        f"Попытка {attempt}/{max_attempts}: "
+                        f"не удалось установить соединение"
+                    )
+                else:
+                    last_error = (
+                        f"Попытка {attempt}/{max_attempts}: "
+                        f"ошибка команды подключения"
                     )
 
-                return (
-                    False,
-                    f"Попытка {attempt}/{max_attempts}: Ошибка команды подключения",
-                )
-
             except Exception as e:
-                return False, f"Попытка {attempt}/{max_attempts}: Ошибка: {e}"
+                last_error = f"Попытка {attempt}/{max_attempts}: ошибка: {e}"
 
             finally:
                 if temp_path and os.path.exists(temp_path):
@@ -170,11 +167,11 @@ class WiFiMonitor:
                     except OSError:
                         pass
 
-            # До сюда исполнение не доходит (есть return выше), оставлено на будущее
+            # Пауза перед следующей попыткой
             if attempt < max_attempts:
                 time.sleep(config.RECONNECT_DELAY)
 
-        return False, f"Не удалось подключиться после {max_attempts} попыток"
+        return False, f"Не удалось подключиться после {max_attempts} попыток ({last_error})"
 
     # ── Интернет ──────────────────────────────
     def check_internet(self) -> bool:

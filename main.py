@@ -471,13 +471,11 @@ class MainWindow(QMainWindow):
         if self._log_count <= self.MAX_LOG_LINES:
             return
 
+        excess = self._log_count - self.MAX_LOG_LINES
         cursor = self.status_display.textCursor()
         cursor.movePosition(cursor.Start)
-        excess = self._log_count - self.MAX_LOG_LINES
-        for _ in range(excess):
-            cursor.select(cursor.LineUnderCursor)
-            cursor.removeSelectedText()
-            cursor.deleteChar()  # удалить перенос строки
+        cursor.movePosition(cursor.Down, cursor.KeepAnchor, excess)
+        cursor.removeSelectedText()
         self._log_count = self.MAX_LOG_LINES
 
     def update_status(self, message: str, status_changed: bool):
