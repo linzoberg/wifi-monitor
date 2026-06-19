@@ -11,7 +11,7 @@ import keyring
 import keyring.errors
 from PyQt5.QtCore import QSettings
 
-import config
+import wifi_monitor
 
 ORG_NAME = "WiFiMonitor"
 APP_NAME = "WiFiMonitor"
@@ -73,11 +73,11 @@ def _clamp(value: int, lo: int, hi: int) -> int:
 
 
 def load_prefs() -> Prefs:
-    """Загружает настройки, подставляя дефолты из config.py."""
+    """Загружает настройки, подставляя дефолты из wifi_monitor.py."""
     qs = _qs()
-    check_interval = qs.value("check_interval", config.CHECK_INTERVAL, type=int)
+    check_interval = qs.value("check_interval", wifi_monitor.CHECK_INTERVAL, type=int)
     ping_interval = qs.value("ping_interval", 5, type=int)
-    router_ip = qs.value("router_ip", config.ROUTER_IP, type=str) or config.ROUTER_IP
+    router_ip = qs.value("router_ip", wifi_monitor.ROUTER_IP, type=str) or wifi_monitor.ROUTER_IP
 
     return Prefs(
         check_interval=_clamp(check_interval, CHECK_INTERVAL_MIN, CHECK_INTERVAL_MAX),

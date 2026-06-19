@@ -1,5 +1,7 @@
 """
 Управление и мониторинг Wi-Fi подключения через netsh (Windows).
+Здесь же лежат сетевые настройки по умолчанию и хелпер для запуска
+внешних команд со скрытым окном консоли.
 """
 import os
 import re
@@ -8,8 +10,40 @@ import subprocess
 import tempfile
 import time
 
-import config
-from proc_utils import run_hidden
+# ── Настройки сети / поведения ────────────────
+ROUTER_IP = "192.168.0.1"          # IP роутера для проверки локальной сети
+CHECK_INTERVAL = 5                 # Интервал проверки Wi-Fi, сек
+RECONNECT_ATTEMPTS = 100           # Сколько раз пытаться переподключиться
+RECONNECT_DELAY = 2                # Пауза между попытками, сек
+
+# ── Скрытие окон CMD (PyInstaller --windowed) ─
+if os.name == "nt":
+    _STARTUPINFO = subprocess.STARTUPINFO()
+    _STARTUPINFO.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    _STARTUPINFO.wShowWindow = subprocess.SW_HIDE
+    _CREATE_NO_WINDOW = 0x08000000
+else:  # pragma: no cover — приложение Windows-only
+    _STARTUPINFO = None
+    _CREATE_NO_WINDOW = 0
+
+
+def run_hidden(
+    cmd,
+    timeout: float = 5,
+    text: bool = True,
+    encoding: str = "cp866",
+) -> subprocess.CompletedProcess:
+    """Запуск процесса со скрытым окном и единым кодированием вывода."""
+    return subprocess.run(
+        cmd,
+        capture_output=True,
+        text=text,
+        encoding=encoding if text else None,
+        timeout=timeout,
+        startupinfo=_STARTUPINFO,
+        creationflags=_CREATE_NO_WINDOW,
+    )
+
 
 # Совпадает строка вида:  SSID                   : MyNetwork
 _RE_SSID = re.compile(r"^\s*SSID\s*:\s*(.+)$", re.MULTILINE)
@@ -25,7 +59,7 @@ class WiFiMonitor:
     def __init__(self, ssid: str, password: str, router_ip: str | None = None):
         self.ssid = ssid
         self.password = password
-        self.router_ip = router_ip or config.ROUTER_IP
+        self.router_ip = router_ip or ROUTER_IP
         self.connected = False
         self.ssid_available = False
 
@@ -142,7 +176,7 @@ class WiFiMonitor:
 
     def connect_to_wifi(self) -> tuple[bool, str]:
         """Пытается подключиться, с повторами по конфигу."""
-        max_attempts = config.RECONNECT_ATTEMPTS
+        max_attempts = RECONNECT_ATTEMPTS
         last_error = ""
 
         for attempt in range(1, max_attempts + 1):
@@ -153,7 +187,7 @@ class WiFiMonitor:
             last_error = f"Попытка {attempt}/{max_attempts}: {err}"
 
             if attempt < max_attempts:
-                time.sleep(config.RECONNECT_DELAY)
+                time.sleep(RECONNECT_DELAY)
 
         return False, f"Не удалось подключиться после {max_attempts} попыток ({last_error})"
 

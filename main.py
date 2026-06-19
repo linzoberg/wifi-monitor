@@ -31,10 +31,13 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-import config
 import settings
-from proc_utils import run_hidden
-from wifi_monitor import WiFiMonitor
+from wifi_monitor import WiFiMonitor, run_hidden
+
+# ── Настройки интерфейса ─────────────────────────────
+APP_TITLE = "Wi-Fi Монитор"
+APP_WIDTH = 600
+APP_HEIGHT = 400
 
 # ─────────────────────────────────────────────
 #  Стили (дизайн интерфейса не меняем)
@@ -261,8 +264,8 @@ class MainWindow(QMainWindow):
 
     # ── UI ────────────────────────────────────
     def _init_ui(self):
-        self.setWindowTitle(config.APP_TITLE)
-        self.setFixedSize(config.APP_WIDTH, config.APP_HEIGHT)
+        self.setWindowTitle(APP_TITLE)
+        self.setFixedSize(APP_WIDTH, APP_HEIGHT)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -272,7 +275,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(20, 20, 20, 20)
 
         # Заголовок
-        title = QLabel(config.APP_TITLE)
+        title = QLabel(APP_TITLE)
         title.setFont(QFont("Arial", 16, QFont.Bold))
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("color: #2c3e50; margin-bottom: 10px;")
