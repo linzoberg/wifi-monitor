@@ -54,9 +54,7 @@ class WiFiMonitor:
             if result.returncode == 0:
                 self.ssid_available = self.ssid in result.stdout
                 return self.ssid_available
-        except subprocess.TimeoutExpired:
-            pass
-        except Exception as e:
+        except (subprocess.SubprocessError, OSError) as e:
             print(f"Ошибка при сканировании сетей: {e}")
         return False
 
@@ -77,7 +75,7 @@ class WiFiMonitor:
             self.connected = bool(current_ssid == self.ssid and is_connected)
             return self.connected
 
-        except Exception as e:
+        except (subprocess.SubprocessError, OSError) as e:
             print(f"Ошибка при получении информации о подключении: {e}")
             self.connected = False
             return False
@@ -144,8 +142,7 @@ class WiFiMonitor:
                 )
 
                 if connect_result.returncode == 0:
-                    time.sleep(3)
-                    if self.get_current_connection():
+                    if self._wait_for_connection(timeout=5.0, poll=0.5):
                         return True, f"Успешно подключено к {self.ssid}"
                     last_error = (
                         f"Попытка {attempt}/{max_attempts}: "
@@ -157,7 +154,7 @@ class WiFiMonitor:
                         f"ошибка команды подключения"
                     )
 
-            except Exception as e:
+            except (subprocess.SubprocessError, OSError) as e:
                 last_error = f"Попытка {attempt}/{max_attempts}: ошибка: {e}"
 
             finally:
@@ -172,6 +169,15 @@ class WiFiMonitor:
                 time.sleep(config.RECONNECT_DELAY)
 
         return False, f"Не удалось подключиться после {max_attempts} попыток ({last_error})"
+
+    def _wait_for_connection(self, timeout: float = 5.0, poll: float = 0.5) -> bool:
+        """Активно ждёт появления подключения вместо фиксированной паузы."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self.get_current_connection():
+                return True
+            time.sleep(poll)
+        return False
 
     # ── Интернет ──────────────────────────────
     def check_internet(self) -> bool:

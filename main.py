@@ -10,6 +10,7 @@ from PyQt5.QtGui import QBrush, QColor, QFont, QIcon, QPainter, QPixmap
 from PyQt5.QtWidgets import (
     QAction,
     QApplication,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -27,6 +28,7 @@ from PyQt5.QtWidgets import (
 )
 
 import config
+import settings
 from wifi_monitor import WiFiMonitor
 
 
@@ -298,6 +300,14 @@ class MainWindow(QMainWindow):
         # Кнопки
         layout.addLayout(self._build_buttons())
 
+        # Автозапуск
+        self.autostart_checkbox = QCheckBox("Запускать при старте Windows")
+        self.autostart_checkbox.setFont(QFont("Arial", 9))
+        self.autostart_checkbox.setStyleSheet("color: #7f8c8d; padding-top: 4px;")
+        self.autostart_checkbox.setChecked(settings.is_autostart_enabled())
+        self.autostart_checkbox.toggled.connect(self._on_autostart_toggled)
+        layout.addWidget(self.autostart_checkbox)
+
         # Статусная строка
         self.bottom_status = QLabel("Готов к работе...")
         self.bottom_status.setFont(QFont("Arial", 9))
@@ -386,6 +396,17 @@ class MainWindow(QMainWindow):
             self.ping_thread.stop()
         self.tray.hide()
         QApplication.quit()
+
+    def _on_autostart_toggled(self, checked: bool):
+        if not settings.set_autostart(checked):
+            QMessageBox.warning(
+                self,
+                "Автозапуск",
+                "Не удалось обновить настройку автозапуска.",
+            )
+            self.autostart_checkbox.blockSignals(True)
+            self.autostart_checkbox.setChecked(not checked)
+            self.autostart_checkbox.blockSignals(False)
 
     # ── Пинг ──────────────────────────────────
     def _init_ping(self):
@@ -521,18 +542,24 @@ class MainWindow(QMainWindow):
 # ─────────────────────────────────────────────
 def ask_credentials() -> tuple[str, str] | None:
     """Показывает диалог ввода SSID/пароля. Возвращает (ssid, password) или None."""
+    saved_ssid, saved_password, saved_remember = settings.load_credentials()
+
     dialog = QDialog()
     dialog.setWindowTitle("Настройка Wi-Fi сети")
-    dialog.setFixedSize(350, 180)
+    dialog.setFixedSize(350, 210)
 
     layout = QFormLayout(dialog)
 
-    ssid_input = QLineEdit()
-    password_input = QLineEdit()
+    ssid_input = QLineEdit(saved_ssid)
+    password_input = QLineEdit(saved_password)
     password_input.setEchoMode(QLineEdit.Password)
+
+    remember_checkbox = QCheckBox("Запомнить меня")
+    remember_checkbox.setChecked(saved_remember)
 
     layout.addRow("SSID сети:", ssid_input)
     layout.addRow("Пароль:", password_input)
+    layout.addRow("", remember_checkbox)
 
     buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
     buttons.accepted.connect(dialog.accept)
@@ -548,6 +575,11 @@ def ask_credentials() -> tuple[str, str] | None:
     if not ssid or not password:
         QMessageBox.critical(None, "Ошибка", "SSID и пароль не могут быть пустыми!")
         return None
+
+    if remember_checkbox.isChecked():
+        settings.save_credentials(ssid, password)
+    else:
+        settings.forget_credentials()
 
     return ssid, password
 
